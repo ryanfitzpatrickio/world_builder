@@ -1,0 +1,166 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>City Modular WFC Builder</title>
+    <style>
+      body { margin: 0; font-family: Arial, sans-serif; background: #101826; color: #d9e2ec; }
+      #app { display: flex; height: 100vh; }
+      #sidebar { width: 300px; padding: 12px; background: #182330; overflow: auto; box-sizing: border-box; }
+      #config-dock { width: 320px; padding: 12px; background: #151f2c; overflow: auto; box-sizing: border-box; border-left: 1px solid #2e3d52; }
+      #viewport {
+        position: relative;
+        flex: 1;
+        min-width: 0;
+        background: radial-gradient(circle at top, #243447, #0d141f 70%);
+      }
+      #viewport canvas { display: block; }
+      h1 { font-size: 16px; margin: 8px 0; color: #9be3ff; }
+      .group { border: 1px solid #2e3d52; border-radius: 4px; padding: 10px; margin-bottom: 10px; }
+      .group > div { margin-bottom: 8px; }
+      .field { display: grid; gap: 4px; margin: 8px 0; }
+      .field label { font-size: 12px; color: #9fb4cc; }
+      .field small { color: #8095ad; line-height: 1.35; }
+      .row { display: flex; gap: 6px; flex-wrap: wrap; }
+      button, select, input { background: #1f2e43; color: #d9e2ec; border: 1px solid #354c6d; border-radius: 4px; padding: 6px 8px; max-width: 100%; }
+      input[type="range"] { padding: 0; }
+      button.active { background: #4a6a95; }
+      .brush-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 6px; }
+      .brush-option { text-align: left; min-height: 44px; }
+      .brush-option.active { background: #8a5f35; border-color: #d8a35f; }
+      .brush-option small { display: block; color: #9fb4cc; font-size: 10px; margin-top: 2px; }
+      .pill { display: inline-block; padding: 3px 8px; border-radius: 999px; background: #27374d; margin: 2px; font-size: 11px; }
+      pre { white-space: pre-wrap; font-size: 12px; max-height: 140px; overflow: auto; }
+      #debugOutput { min-height: 110px; }
+      .danger { color: #ffb4b4; }
+      .ok { color: #9ae6a4; }
+    </style>
+  </head>
+  <body>
+    <div id="app">
+      <aside id="sidebar">
+        <h1>WFC + Modular Builder</h1>
+        <div class="group">
+          <strong>Tools</strong>
+          <div class="row">
+            <button id="tool-select" data-tool="select">Select</button>
+            <button id="tool-room" data-tool="room">Draw Room</button>
+            <button id="tool-corridor" data-tool="corridor">Draw Corridor</button>
+            <button id="tool-bridge" data-tool="bridge">Draw Bridge</button>
+            <button id="tool-erase" data-tool="erase">Erase</button>
+            <button id="tool-brush" data-tool="brush">Paint</button>
+          </div>
+        </div>
+        <div class="group">
+          <strong>Plan</strong>
+          <div>
+            Floor level:
+            <select id="current-floor">
+              <option value="0">0</option>
+              <option value="1">1</option>
+              <option value="2">2</option>
+            </select>
+          </div>
+          <div>
+            Style:
+            <select id="current-style">
+              <option value="western" selected>old west saloon</option>
+              <option value="stone">stone</option>
+              <option value="wood">wood</option>
+              <option value="metal">metal</option>
+            </select>
+          </div>
+          <div>
+            <label><input id="auto-rebuild" type="checkbox" checked /> Auto rebuild</label>
+          </div>
+          <div>
+            <button id="rebuild">Rebuild</button>
+            <button id="clear-plan">Clear Plan</button>
+          </div>
+        </div>
+        <div class="group">
+          <strong>WFC</strong>
+          <div class="row">
+            <button id="run-wfc">Run WFC</button>
+            <button id="step-wfc">Step WFC</button>
+            <button id="reset-wfc">Reset WFC</button>
+          </div>
+          <div>Seed <input id="wfc-seed" value="1" type="number" /></div>
+        </div>
+        <div class="group">
+          <strong>Rules</strong>
+          <div><label><input type="checkbox" id="rule-walls" checked /> Walls</label></div>
+          <div><label><input type="checkbox" id="rule-doors" checked /> Doors</label></div>
+          <div><label><input type="checkbox" id="rule-windows" checked /> Windows</label></div>
+          <div><label><input type="checkbox" id="rule-bridges" checked /> Bridges</label></div>
+          <div><label><input type="checkbox" id="rule-roofs" checked /> Roofs</label></div>
+          <div><label><input type="checkbox" id="rule-props" checked /> Props</label></div>
+        </div>
+        <div class="group">
+          <strong>Selected</strong>
+          <div id="selected-info">Nothing selected</div>
+          <div id="selected-tags"></div>
+          <div>
+            <label>Lock tile
+            <select id="force-tile">
+              <option value="">-- keep --</option>
+            </select>
+          </div>
+          <div><button id="clear-selection">Clear</button></div>
+        </div>
+        <div class="group">
+          <strong>Debug</strong>
+          <pre id="debug-output"></pre>
+        </div>
+        <div class="group">
+          <strong>Lighting</strong>
+          <div class="field">
+            <label>Sun intensity</label>
+            <input id="lighting-sun-intensity" type="range" min="0" max="3" step="0.05" value="1.25" />
+          </div>
+          <div class="field">
+            <label>Sun elevation</label>
+            <input id="lighting-sun-elevation" type="range" min="5" max="85" step="1" value="38" />
+          </div>
+          <div class="field">
+            <label>Sun azimuth</label>
+            <input id="lighting-sun-azimuth" type="range" min="0" max="360" step="1" value="305" />
+          </div>
+          <div class="field">
+            <label>Sky fill</label>
+            <input id="lighting-sky-fill" type="range" min="0" max="2" step="0.05" value="0.72" />
+          </div>
+          <div class="field">
+            <label>Interior base light</label>
+            <input id="lighting-interior-ambient" type="range" min="0" max="1" step="0.02" value="0.18" />
+          </div>
+          <div class="field">
+            <label>Exposure</label>
+            <input id="lighting-exposure" type="range" min="0.4" max="2" step="0.02" value="1.08" />
+          </div>
+          <div><label><input id="lighting-roof-shadows" type="checkbox" checked /> Invisible roofs cast interior shadows</label></div>
+        </div>
+      </aside>
+      <main id="viewport"></main>
+      <aside id="config-dock">
+        <h1>Level Config</h1>
+        <div class="group">
+          <strong>Selected type</strong>
+          <div id="config-kind">Select a wall, floor, door, window, roof, or prop.</div>
+          <div id="config-description"></div>
+        </div>
+        <div class="group">
+          <strong>Type settings</strong>
+          <div id="config-controls"></div>
+        </div>
+        <div class="group">
+          <strong>Paint Brush</strong>
+          <div id="brush-current">No brush selected</div>
+          <div id="brush-palette"></div>
+        </div>
+      </aside>
+    </div>
+    <script type="module" src="./src/main.js"></script>
+  </body>
+</html>

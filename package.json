@@ -1,0 +1,26 @@
+{
+  "name": "world-builder",
+  "description": "Browser-based modular western level builder using Vite, Three.js, deterministic rules, and WFC-style tile constraints.",
+  "type": "module",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/ryanfitzpatrickio/world_builder.git"
+  },
+  "bugs": {
+    "url": "https://github.com/ryanfitzpatrickio/world_builder/issues"
+  },
+  "homepage": "https://github.com/ryanfitzpatrickio/world_builder#readme",
+  "scripts": {
+    "dev": "vite --host 127.0.0.1",
+    "build": "vite build",
+    "debug:level": "vitexec --gpu --path / --timeout 20 --screenshot /tmp/level-maker-vitexec.png vitexec/check-level.js",
+    "preview": "vite preview --host 127.0.0.1"
+  },
+  "dependencies": {
+    "three": "^0.184.0"
+  },
+  "devDependencies": {
+    "vite": "^7.2.7",
+    "vitexec": "^0.1.12"
+  }
+}
