@@ -229,23 +229,23 @@ export class TileView {
     if (kind === 'westernPlanks' || kind === 'westernPlanksDark') {
       ctx.fillStyle = kind === 'westernPlanks' ? '#8b5a2b' : '#6a3f20';
       ctx.fillRect(0, 0, 128, 128);
-      for (let y = 0; y < 128; y += 24) {
-        ctx.fillStyle = y % 48 === 0 ? 'rgba(255,220,150,0.12)' : 'rgba(0,0,0,0.12)';
-        ctx.fillRect(0, y + 2, 128, 7);
+      for (let x = 0; x < 128; x += 24) {
+        ctx.fillStyle = x % 48 === 0 ? 'rgba(255,220,150,0.12)' : 'rgba(0,0,0,0.12)';
+        ctx.fillRect(x + 2, 0, 7, 128);
         ctx.strokeStyle = 'rgba(32,18,10,0.72)';
         ctx.lineWidth = 2;
         ctx.beginPath();
-        ctx.moveTo(0, y);
-        ctx.lineTo(128, y + 2);
+        ctx.moveTo(x, 0);
+        ctx.lineTo(x + 2, 128);
         ctx.stroke();
       }
-      for (let x = 18; x < 128; x += 34) {
-        const row = Math.floor(x / 34) % 5;
-        const y0 = row * 24;
+      for (let y = 18; y < 128; y += 34) {
+        const column = Math.floor(y / 34) % 5;
+        const x0 = column * 24;
         ctx.strokeStyle = 'rgba(25,14,8,0.5)';
         ctx.beginPath();
-        ctx.moveTo(x, y0 + 3);
-        ctx.lineTo(x + ((x / 18) % 2) * 5, Math.min(128, y0 + 22));
+        ctx.moveTo(x0 + 3, y);
+        ctx.lineTo(Math.min(128, x0 + 22), y + ((y / 18) % 2) * 5);
         ctx.stroke();
       }
       noise(20);
@@ -372,10 +372,6 @@ export class TileView {
       ctx.fillRect(0, 0, 128, 128);
     }
 
-    if (['westernPlanks', 'westernPlanksDark', 'stonePavers', 'packedDirt'].includes(kind)) {
-      cropInward(5);
-    }
-
     const texture = new THREE.CanvasTexture(canvas);
     texture.wrapS = THREE.ClampToEdgeWrapping;
     texture.wrapT = THREE.ClampToEdgeWrapping;
@@ -457,7 +453,7 @@ export class TileView {
   _buildFloor(module, cell, tile) {
     const checker = (cell.x + cell.z) % 2 === 0;
     const configuredFloor = this._configuredMaterial('floor', 'texture', checker ? this.materials.floor : this.materials.floorAlt);
-    this._box(module, configuredFloor, [0.98, 0.08, 0.98], [0, 0.04, 0]);
+    this._box(module, configuredFloor, [1.004, 0.08, 1.004], [0, 0.04, 0]);
     if (cell.style === 'western' || tile?.style === 'western') {
       return;
     }
