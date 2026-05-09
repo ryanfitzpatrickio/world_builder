@@ -91,8 +91,8 @@ export class TileView {
       floor: {
         woodPlanks: this.westernMaterials.floor,
         scuffedWood: this.westernMaterials.floorAlt,
-        stonePavers: this._mat(0x777067, 0.86, 0),
-        packedDirt: this._mat(0x8c6a43, 0.94, 0),
+        stonePavers: this._mat(0x777067, 0.86, 0, 'stonePavers'),
+        packedDirt: this._mat(0x8c6a43, 0.94, 0, 'packedDirt'),
       },
       wall: {
         crackedPlaster: this.westernMaterials.wall,
@@ -204,6 +204,16 @@ export class TileView {
     canvas.width = 128;
     canvas.height = 128;
     const ctx = canvas.getContext('2d');
+    const cropInward = (inset = 4) => {
+      const copy = document.createElement('canvas');
+      copy.width = canvas.width;
+      copy.height = canvas.height;
+      copy
+        .getContext('2d')
+        .drawImage(canvas, inset, inset, canvas.width - inset * 2, canvas.height - inset * 2, 0, 0, canvas.width, canvas.height);
+      ctx.clearRect(0, 0, canvas.width, canvas.height);
+      ctx.drawImage(copy, 0, 0);
+    };
     const noise = (amount = 28) => {
       const image = ctx.getImageData(0, 0, canvas.width, canvas.height);
       for (let i = 0; i < image.data.length; i += 4) {
@@ -230,13 +240,41 @@ export class TileView {
         ctx.stroke();
       }
       for (let x = 18; x < 128; x += 34) {
+        const row = Math.floor(x / 34) % 5;
+        const y0 = row * 24;
         ctx.strokeStyle = 'rgba(25,14,8,0.5)';
         ctx.beginPath();
-        ctx.moveTo(x, 0);
-        ctx.lineTo(x + ((x / 18) % 2) * 5, 128);
+        ctx.moveTo(x, y0 + 3);
+        ctx.lineTo(x + ((x / 18) % 2) * 5, Math.min(128, y0 + 22));
         ctx.stroke();
       }
       noise(20);
+    } else if (kind === 'stonePavers') {
+      ctx.fillStyle = '#777067';
+      ctx.fillRect(0, 0, 128, 128);
+      for (let y = 0; y < 128; y += 32) {
+        for (let x = (y / 32) % 2 === 0 ? 0 : -18; x < 128; x += 38) {
+          ctx.fillStyle = `rgb(${105 + ((x + y) % 30)}, ${100 + ((x + y) % 24)}, ${92 + ((x + y) % 22)})`;
+          ctx.fillRect(x + 2, y + 2, 34, 28);
+          ctx.strokeStyle = 'rgba(34,30,26,0.65)';
+          ctx.lineWidth = 2;
+          ctx.strokeRect(x + 2, y + 2, 34, 28);
+        }
+      }
+      noise(18);
+    } else if (kind === 'packedDirt') {
+      ctx.fillStyle = '#8c6a43';
+      ctx.fillRect(0, 0, 128, 128);
+      for (let i = 0; i < 90; i++) {
+        const x = (i * 37) % 128;
+        const y = (i * 61) % 128;
+        const r = 1 + (i % 4);
+        ctx.fillStyle = i % 3 === 0 ? 'rgba(52,34,19,0.28)' : 'rgba(191,153,95,0.22)';
+        ctx.beginPath();
+        ctx.ellipse(x, y, r * 1.5, r, (i % 9) * 0.3, 0, Math.PI * 2);
+        ctx.fill();
+      }
+      noise(34);
     } else if (kind === 'verticalWood' || kind === 'darkWood' || kind === 'crateWood' || kind === 'horizontalWood' || kind === 'redPaintedWood') {
       ctx.fillStyle = kind === 'darkWood'
         ? '#4b2d17'
@@ -334,9 +372,13 @@ export class TileView {
       ctx.fillRect(0, 0, 128, 128);
     }
 
+    if (['westernPlanks', 'westernPlanksDark', 'stonePavers', 'packedDirt'].includes(kind)) {
+      cropInward(5);
+    }
+
     const texture = new THREE.CanvasTexture(canvas);
-    texture.wrapS = THREE.RepeatWrapping;
-    texture.wrapT = THREE.RepeatWrapping;
+    texture.wrapS = THREE.ClampToEdgeWrapping;
+    texture.wrapT = THREE.ClampToEdgeWrapping;
     texture.repeat.set(1, 1);
     texture.colorSpace = THREE.SRGBColorSpace;
     return texture;
@@ -417,10 +459,6 @@ export class TileView {
     const configuredFloor = this._configuredMaterial('floor', 'texture', checker ? this.materials.floor : this.materials.floorAlt);
     this._box(module, configuredFloor, [0.98, 0.08, 0.98], [0, 0.04, 0]);
     if (cell.style === 'western' || tile?.style === 'western') {
-      this._box(module, this.materials.floorLine, [0.035, 0.018, 0.94], [-0.25, 0.098, 0]);
-      this._box(module, this.materials.floorLine, [0.035, 0.018, 0.94], [0.25, 0.098, 0]);
-      this._box(module, this.materials.floorLine, [0.92, 0.012, 0.018], [0, 0.102, -0.49]);
-      this._box(module, this.materials.floorLine, [0.92, 0.012, 0.018], [0, 0.102, 0.49]);
       return;
     }
     this._box(module, this.materials.floorLine, [0.018, 0.012, 0.92], [0.49, 0.092, 0]);

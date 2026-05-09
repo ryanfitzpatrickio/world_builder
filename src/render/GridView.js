@@ -24,25 +24,6 @@ export class GridView {
     helper.rotation.y = Math.PI / 2;
     this.group.add(helper);
 
-    for (let y = 0; y < this.grid.height; y++) {
-      const plane = new THREE.Mesh(
-        new THREE.BoxGeometry(this.grid.width, this.grid.depth, 0.01),
-        new THREE.MeshBasicMaterial({
-          color: 0x173147,
-          transparent: true,
-          opacity: 0.18,
-          depthWrite: false,
-        })
-      );
-      plane.renderOrder = -10;
-      plane.position.set(
-        this.grid.originX + (this.grid.width * this.grid.cellSize) / 2,
-        y * this.grid.cellSize + 0.001,
-        this.grid.originZ + (this.grid.depth * this.grid.cellSize) / 2
-      );
-      plane.rotation.x = Math.PI / 2;
-      this.group.add(plane);
-    }
   }
 
   dispose() {
