@@ -13,8 +13,8 @@ export function createFloorTiles() {
         NX: 'floor',
         PZ: 'floor',
         NZ: 'floor',
-        PY: 'wall_stone',
-        NY: 'support',
+        PY: 'any',
+        NY: 'any',
       },
     }),
     new TileDefinition({
@@ -28,8 +28,8 @@ export function createFloorTiles() {
         NX: 'floor',
         PZ: 'floor',
         NZ: 'floor',
-        PY: 'wall_wood',
-        NY: 'support',
+        PY: 'any',
+        NY: 'any',
       },
     }),
   ];

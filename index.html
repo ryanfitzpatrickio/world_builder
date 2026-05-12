@@ -24,6 +24,7 @@
       .field small { color: #8095ad; line-height: 1.35; }
       .row { display: flex; gap: 6px; flex-wrap: wrap; }
       button, select, input { background: #1f2e43; color: #d9e2ec; border: 1px solid #354c6d; border-radius: 4px; padding: 6px 8px; max-width: 100%; }
+      textarea { width: 100%; box-sizing: border-box; background: #101826; color: #d9e2ec; border: 1px solid #354c6d; border-radius: 4px; padding: 6px 8px; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 11px; resize: vertical; }
       input[type="range"] { padding: 0; }
       button.active { background: #4a6a95; }
       .brush-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 6px; }
@@ -31,6 +32,27 @@
       .brush-option.active { background: #8a5f35; border-color: #d8a35f; }
       .brush-option small { display: block; color: #9fb4cc; font-size: 10px; margin-top: 2px; }
       .pill { display: inline-block; padding: 3px 8px; border-radius: 999px; background: #27374d; margin: 2px; font-size: 11px; }
+      .agent-transcript { display: grid; gap: 6px; max-height: 130px; overflow: auto; margin: 8px 0; }
+      .agent-message { background: #101826; border: 1px solid #2e3d52; border-radius: 4px; padding: 6px 8px; font-size: 12px; line-height: 1.35; }
+      .agent-message.user { border-color: #4a6a95; }
+      .agent-message.agent { border-color: #8a5f35; }
+      .perf-stats { display: grid; gap: 6px; margin-top: 8px; font-size: 11px; }
+      .perf-row { display: flex; justify-content: space-between; gap: 10px; border-bottom: 1px solid rgba(159, 180, 204, 0.14); padding-bottom: 3px; }
+      .perf-row span:first-child { color: #9fb4cc; }
+      .perf-row span:last-child { color: #d9e2ec; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; text-align: right; }
+      .perf-row.warn span:last-child { color: #ffcf77; }
+      .perf-row.bad span:last-child { color: #ff9f9f; }
+      .autosave-status { color: #8095ad; font-size: 11px; line-height: 1.35; }
+      .modal-backdrop { position: fixed; inset: 0; z-index: 20; display: grid; place-items: center; background: rgba(8, 13, 20, 0.72); }
+      .modal-backdrop[hidden] { display: none; }
+      .modal { width: min(820px, calc(100vw - 32px)); max-height: min(720px, calc(100vh - 32px)); display: grid; grid-template-rows: auto 1fr; background: #151f2c; border: 1px solid #354c6d; border-radius: 6px; box-shadow: 0 18px 60px rgba(0,0,0,0.42); overflow: hidden; }
+      .modal-header { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 12px; border-bottom: 1px solid #2e3d52; }
+      .modal-header h2 { margin: 0; font-size: 16px; color: #d9e2ec; }
+      .level-list { overflow: auto; padding: 8px; display: grid; gap: 6px; }
+      .level-file { display: grid; grid-template-columns: 1fr auto; gap: 8px; text-align: left; width: 100%; background: #101826; }
+      .level-file strong { display: block; margin-bottom: 3px; }
+      .level-file small { display: block; color: #9fb4cc; font-size: 11px; line-height: 1.35; }
+      .level-file .meta { color: #d8a35f; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; align-self: center; }
       pre { white-space: pre-wrap; font-size: 12px; max-height: 140px; overflow: auto; }
       #debugOutput { min-height: 110px; }
       .danger { color: #ffb4b4; }
@@ -48,8 +70,11 @@
             <button id="tool-room" data-tool="room">Draw Room</button>
             <button id="tool-corridor" data-tool="corridor">Draw Corridor</button>
             <button id="tool-bridge" data-tool="bridge">Draw Bridge</button>
+            <button id="tool-transform" data-tool="transform">Transform</button>
+            <button id="tool-stack" data-tool="stack">Stack</button>
             <button id="tool-erase" data-tool="erase">Erase</button>
             <button id="tool-brush" data-tool="brush">Paint</button>
+            <button id="validate-level">Validate</button>
           </div>
         </div>
         <div class="group">
@@ -60,7 +85,9 @@
               <option value="0">0</option>
               <option value="1">1</option>
               <option value="2">2</option>
+              <option value="3">3</option>
             </select>
+            <label><input id="show-all-floors" type="checkbox" /> Show all</label>
           </div>
           <div>
             Style:
@@ -75,8 +102,41 @@
             <label><input id="auto-rebuild" type="checkbox" checked /> Auto rebuild</label>
           </div>
           <div>
+            <label><input id="camera-free-cam" type="checkbox" /> Free cam</label>
+          </div>
+          <div class="field">
+            <label>File name</label>
+            <input id="level-name" type="text" value="Untitled level" />
+            <small>Save as starts a separate JSON file and future autosaves continue there.</small>
+          </div>
+          <div>
             <button id="rebuild">Rebuild</button>
             <button id="clear-plan">Clear Plan</button>
+          </div>
+          <div class="row">
+            <button id="open-level-files">Files</button>
+            <button id="save-level-now">Save now</button>
+            <button id="save-level-as">Save as</button>
+            <button id="export-glb">Export GLB</button>
+          </div>
+          <div id="autosave-status" class="autosave-status">Autosave idle</div>
+        </div>
+        <div class="group">
+          <strong>Agent Layout</strong>
+          <div id="agent-transcript" class="agent-transcript"></div>
+          <div class="field">
+            <label>Prompt</label>
+            <textarea id="agent-prompt" rows="3" placeholder="make a two story saloon with an upper balcony"></textarea>
+            <button id="agent-apply">Apply</button>
+          </div>
+          <div class="row">
+            <button id="load-agent-sample">Load 2-story</button>
+            <button id="copy-plan-json">Copy JSON</button>
+          </div>
+          <div class="field">
+            <label>Import plan JSON</label>
+            <textarea id="plan-json-input" rows="5" placeholder='{"shapes":[...]}'></textarea>
+            <button id="load-plan-json">Load JSON</button>
           </div>
         </div>
         <div class="group">
@@ -139,7 +199,16 @@
             <label>Exposure</label>
             <input id="lighting-exposure" type="range" min="0.4" max="2" step="0.02" value="1.08" />
           </div>
-          <div><label><input id="lighting-roof-shadows" type="checkbox" checked /> Invisible roofs cast interior shadows</label></div>
+          <div class="field">
+            <label>Max point lights</label>
+            <input id="lighting-max-point-lights" type="range" min="0" max="64" step="1" value="12" />
+          </div>
+          <div><label><input id="lighting-module-shadows" type="checkbox" /> Module mesh shadows</label></div>
+          <div><label><input id="lighting-roof-shadows" type="checkbox" /> Invisible roofs cast interior shadows</label></div>
+        </div>
+        <div class="group">
+          <strong>Performance</strong>
+          <div id="performance-stats" class="perf-stats"></div>
         </div>
       </aside>
       <main id="viewport"></main>
@@ -160,6 +229,18 @@
           <div id="brush-palette"></div>
         </div>
       </aside>
+    </div>
+    <div id="level-files-modal" class="modal-backdrop" hidden>
+      <section class="modal" role="dialog" aria-modal="true" aria-labelledby="level-files-title">
+        <div class="modal-header">
+          <h2 id="level-files-title">Saved Levels</h2>
+          <div class="row">
+            <button id="refresh-level-files">Refresh</button>
+            <button id="close-level-files">Close</button>
+          </div>
+        </div>
+        <div id="level-files-list" class="level-list"></div>
+      </section>
     </div>
     <script type="module" src="./src/main.js"></script>
   </body>

@@ -27,6 +27,12 @@ export class Cell {
   }
 
   clearGeneratedData() {
+    if (this.lockedByUser) {
+      this.possibleTiles = new Set();
+      this.collapsedTile = this.fixedTile || this.collapsedTile;
+      this.contradiction = false;
+      return;
+    }
     const lockedByUser = this.lockedByUser;
     const fixedTile = this.fixedTile;
     this.generatedBy = null;

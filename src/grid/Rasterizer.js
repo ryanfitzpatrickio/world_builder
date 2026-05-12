@@ -1,6 +1,14 @@
 import { RoomShape } from '../plan/RoomShape.js';
 import { CorridorShape } from '../plan/CorridorShape.js';
 import { BridgePath } from '../plan/BridgePath.js';
+import { BUILTIN_PROP_TAGS, normalizePropId, propTypeTag } from '../props/PropDefinitions.js';
+
+const STAIR_DIRECTIONS = {
+  PX: { x: 1, z: 0, sideX: 0, sideZ: 1 },
+  NX: { x: -1, z: 0, sideX: 0, sideZ: 1 },
+  PZ: { x: 0, z: 1, sideX: 1, sideZ: 0 },
+  NZ: { x: 0, z: -1, sideX: 1, sideZ: 0 },
+};
 
 export function rasterizePlanToGrid(planDocument, grid, changedRegion = null) {
   const region = changedRegion || grid.getBounds();
@@ -13,11 +21,24 @@ export function rasterizePlanToGrid(planDocument, grid, changedRegion = null) {
     cell.tags.clear();
   }
 
-  for (const shape of planDocument.getShapes()) {
+  const shapes = planDocument.getShapes();
+  for (const shape of shapes) {
     if (shape.floor < 0 || shape.floor >= grid.height) continue;
     if (shape.type === 'room') rasterizeRoom(shape, grid);
     if (shape.type === 'corridor') rasterizeCorridor(shape, grid);
     if (shape.type === 'bridgePath') rasterizeBridge(shape, grid);
+  }
+
+  // Stairs are applied after floor-bearing shapes so they can reserve an
+  // opening through any upper-story floor that overlaps the stair run.
+  for (const shape of shapes) {
+    if (shape.floor < 0 || shape.floor >= grid.height) continue;
+    if (shape.type === 'stair') rasterizeStair(shape, grid);
+  }
+
+  for (const shape of shapes) {
+    if (shape.floor < 0 || shape.floor >= grid.height) continue;
+    if (shape.type === 'prop') rasterizeProp(shape, grid);
   }
 }
 
@@ -61,6 +82,149 @@ export function rasterizeBridge(bridge, grid) {
       cell.style = bridge.style;
       cell.tags.add('bridge');
     }
+  }
+}
+
+export function rasterizeStair(stair, grid) {
+  const direction = STAIR_DIRECTIONS[stair.direction] || STAIR_DIRECTIONS.PX;
+  const start = grid.worldToCell(stair.x, stair.z, stair.floor);
+  const length = Math.max(1, Math.round(stair.length || 4));
+  const width = Math.max(1, Math.round(stair.width || 1));
+  const sideOffsetStart = -Math.floor(width / 2);
+
+  markStairLandingRow({
+    grid,
+    stair,
+    floor: stair.floor,
+    start,
+    direction,
+    length,
+    width,
+    sideOffsetStart,
+    offsetAlong: -1,
+    tags: ['stairLanding', 'stairBottomLanding', 'keepClear'],
+  });
+  markUpperStairwellCutoutRow({
+    grid,
+    stair,
+    floor: stair.floor + 1,
+    start,
+    direction,
+    length,
+    width,
+    sideOffsetStart,
+    offsetAlong: -1,
+    tags: ['stairwell', 'openToBelow', 'stairBottomHeadroom', 'keepClear'],
+  });
+
+  for (let step = 0; step < length; step++) {
+    for (let side = 0; side < width; side++) {
+      const sideOffset = sideOffsetStart + side;
+      const cell = grid.getCell(
+        start.x + direction.x * step + direction.sideX * sideOffset,
+        stair.floor,
+        start.z + direction.z * step + direction.sideZ * sideOffset
+      );
+      if (!cell) continue;
+      cell.occupancy = 'stair';
+      cell.shapeId = stair.id;
+      cell.style = stair.style;
+      cell.tags.add('stair');
+      cell.tags.add(`stairDir:${stair.direction}`);
+      cell.tags.add(`stairStep:${step}`);
+      cell.tags.add(`stairLength:${length}`);
+
+      markUpperStairwellCutoutCell(grid.getCell(cell.x, stair.floor + 1, cell.z), stair, length, [`stairStep:${step}`]);
+    }
+  }
+
+  const upperFloor = stair.floor + 1;
+  if (upperFloor >= grid.height) return;
+  markStairLandingRow({
+    grid,
+    stair,
+    floor: upperFloor,
+    start,
+    direction,
+    length,
+    width,
+    sideOffsetStart,
+    offsetAlong: length,
+    tags: ['stairLanding', 'stairTopLanding', 'keepClear'],
+  });
+}
+
+function markUpperStairwellCutoutRow({ grid, stair, floor, start, direction, length, width, sideOffsetStart, offsetAlong, tags }) {
+  if (floor >= grid.height) return;
+  for (let side = 0; side < width; side++) {
+    const sideOffset = sideOffsetStart + side;
+    const cell = grid.getCell(
+      start.x + direction.x * offsetAlong + direction.sideX * sideOffset,
+      floor,
+      start.z + direction.z * offsetAlong + direction.sideZ * sideOffset
+    );
+    markUpperStairwellCutoutCell(cell, stair, length, tags);
+  }
+}
+
+function markUpperStairwellCutoutCell(cell, stair, length, extraTags = []) {
+  if (!cell || cell.lockedByUser) return;
+  cell.occupancy = 'stairwell';
+  cell.shapeId = stair.id;
+  cell.style = stair.style;
+  cell.generatedBy = 'stair-opening';
+  cell.tags.clear();
+  cell.tags.add('stairwell');
+  cell.tags.add('openToBelow');
+  cell.tags.add(`stairDir:${stair.direction}`);
+  cell.tags.add(`stairLength:${length}`);
+  for (const tag of extraTags) cell.tags.add(tag);
+}
+
+function markStairLandingRow({ grid, stair, floor, start, direction, length, width, sideOffsetStart, offsetAlong, tags }) {
+  for (let side = 0; side < width; side++) {
+    const sideOffset = sideOffsetStart + side;
+    const landing = grid.getCell(
+      start.x + direction.x * offsetAlong + direction.sideX * sideOffset,
+      floor,
+      start.z + direction.z * offsetAlong + direction.sideZ * sideOffset
+    );
+    if (!landing) continue;
+    if (landing.occupancy === 'empty') {
+      landing.occupancy = 'floor';
+      landing.shapeId = stair.id;
+      landing.style = stair.style;
+      landing.generatedBy = 'stair-landing';
+    }
+    if (landing.occupancy === 'floor' || landing.occupancy === 'bridge' || landing.occupancy === 'stair') {
+      for (const tag of tags) landing.tags.add(tag);
+      landing.tags.add(`stairDir:${stair.direction}`);
+      landing.tags.add(`stairLength:${length}`);
+    }
+  }
+}
+
+export function rasterizeProp(prop, grid) {
+  const cell = grid.cellAtWorld(prop.x, prop.floor, prop.z);
+  if (!cell || !['floor', 'bridge', 'stair'].includes(cell.occupancy)) return;
+  const propId = normalizePropId(prop.prop);
+  const propTag = BUILTIN_PROP_TAGS[propId];
+  const direction = STAIR_DIRECTIONS[prop.direction] ? prop.direction : 'PZ';
+  clearPropTags(cell);
+  cell.style = prop.style || cell.style;
+  cell.tags.add('authoredProp');
+  cell.tags.add('propCandidate');
+  cell.tags.add(propTypeTag(propId));
+  if (propTag) cell.tags.add(propTag);
+  cell.tags.add(`propFace${direction}`);
+}
+
+function clearPropTags(cell) {
+  cell.tags.delete('authoredProp');
+  cell.tags.delete('propCandidate');
+  for (const tag of BUILTIN_PROP_TAGS ? Object.values(BUILTIN_PROP_TAGS) : []) cell.tags.delete(tag);
+  for (const tag of Array.from(cell.tags)) {
+    if (tag.startsWith('propType:') || tag.startsWith('propFace')) cell.tags.delete(tag);
   }
 }
 

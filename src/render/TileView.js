@@ -1,4 +1,5 @@
 import * as THREE from 'three';
+import { BUILTIN_CUSTOM_PROP_DEFINITIONS, normalizePropId } from '../props/PropDefinitions.js';
 
 const HORIZONTAL_DIRS = ['PX', 'NX', 'PZ', 'NZ'];
 
@@ -16,6 +17,13 @@ const DIR_DELTA = {
   NZ: { x: 0, z: -1 },
 };
 
+const OPPOSITE_DIR = {
+  PX: 'NX',
+  NX: 'PX',
+  PZ: 'NZ',
+  NZ: 'PZ',
+};
+
 export class TileView {
   constructor(scene, assetRegistry) {
     this.scene = scene;
@@ -23,6 +31,8 @@ export class TileView {
     this.group = new THREE.Group();
     this.group.name = 'Generated interior modules';
     this.meshes = new Map();
+    this.instanceMeshes = [];
+    this.roofShadowInstanceMesh = null;
     this.lightHandles = new Map();
     this.lightOverrides = {};
     this.scene.add(this.group);
@@ -30,7 +40,7 @@ export class TileView {
     this.geometry = new THREE.BoxGeometry(1, 1, 1);
     this.lightHandleGeometry = new THREE.SphereGeometry(0.11, 14, 8);
     this.lightHandleMaterial = new THREE.MeshBasicMaterial({ color: 0xffd166 });
-    this.roofShadowGeometry = new THREE.BoxGeometry(1.35, 0.22, 1.35);
+    this.roofShadowGeometry = new THREE.BoxGeometry(1.35, 0.05, 1.35);
     this.roofShadowMaterial = new THREE.MeshBasicMaterial({
       color: 0x000000,
       colorWrite: false,
@@ -86,7 +96,8 @@ export class TileView {
       light: 0xffb84f,
     });
     this.typeConfig = {};
-    this.lightingConfig = { roofShadows: true };
+    this.propDefinitions = new Map(BUILTIN_CUSTOM_PROP_DEFINITIONS.map((definition) => [definition.id, definition]));
+    this.lightingConfig = { maxPointLights: 12, moduleShadows: false, roofShadows: false };
     this.configMaterials = {
       floor: {
         woodPlanks: this.westernMaterials.floor,
@@ -127,6 +138,14 @@ export class TileView {
 
   setTypeConfig(typeConfig = {}) {
     this.typeConfig = typeConfig;
+  }
+
+  setPropDefinitions(definitions = []) {
+    this.propDefinitions = new Map(BUILTIN_CUSTOM_PROP_DEFINITIONS.map((definition) => [definition.id, definition]));
+    for (const definition of definitions) {
+      const normalized = normalizePropDefinition(definition);
+      if (normalized) this.propDefinitions.set(normalized.id, normalized);
+    }
   }
 
   setLightingConfig(lightingConfig = {}) {
@@ -380,28 +399,85 @@ export class TileView {
     return texture;
   }
 
-  update(grid) {
+  update(grid, view = {}) {
     this.clear();
     this.lightHandles.clear();
+    this._pointLightsAdded = 0;
+    this._boxBatches = new Map();
+    this._roofShadowMatrices = [];
+    this._view = view;
 
     for (const cell of grid.getAllCells()) {
+      if (!this._isVisibleCell(cell, view)) continue;
       const tileId = cell.collapsedTile || cell.fixedTile;
       if (!tileId || tileId === 'empty') continue;
 
       const tile = this.assetRegistry.getTile(tileId);
-      const module = this._createModule(cell, tile, grid);
+      const position = grid.getWorldPosition(cell);
+      const module = this._createModule(cell, tile, grid, position);
       if (!module) continue;
 
-      const position = grid.getWorldPosition(cell);
-      module.position.set(position.x, position.y, position.z);
       this.group.add(module);
       this.meshes.set(cell.key(), { mesh: module, tile: tileId });
     }
+
+    this._flushBoxBatches();
+    this._view = null;
   }
 
-  _createModule(cell, tile, grid) {
+  createExportGroup(grid) {
+    const exportGroup = new THREE.Group();
+    exportGroup.name = 'Level geometry source';
+    const previousBoxBatches = this._boxBatches;
+    const previousRoofShadowMatrices = this._roofShadowMatrices;
+    const previousLightingConfig = this.lightingConfig;
+    this._boxBatches = null;
+    this._roofShadowMatrices = null;
+    this.lightingConfig = {
+      ...this.lightingConfig,
+      moduleShadows: false,
+      roofShadows: false,
+    };
+
+    try {
+      for (const cell of grid.getAllCells()) {
+        const tileId = cell.collapsedTile || cell.fixedTile;
+        if (!tileId || tileId === 'empty') continue;
+
+        const tile = this.assetRegistry.getTile(tileId);
+        const position = grid.getWorldPosition(cell);
+        const module = this._createModule(cell, tile, grid, position);
+        if (!module) continue;
+        exportGroup.add(module);
+      }
+    } finally {
+      this._boxBatches = previousBoxBatches;
+      this._roofShadowMatrices = previousRoofShadowMatrices;
+      this.lightingConfig = previousLightingConfig;
+    }
+
+    return exportGroup;
+  }
+
+  _isVisibleCell(cell, view = {}) {
+    const activeFloor = Number.isFinite(view.activeFloor) ? view.activeFloor : null;
+    if (activeFloor === null) return true;
+    if (cell.y === activeFloor) {
+      return true;
+    }
+    if (cell.y < activeFloor) return this._isLowerContextCell(cell, activeFloor);
+    return false;
+  }
+
+  _isLowerContextCell(cell, activeFloor) {
+    if (cell.occupancy === 'stair') return cell.y === activeFloor - 1;
+    return cell.occupancy === 'wall' || cell.occupancy === 'support' || cell.occupancy === 'bridge' || cell.occupancy === 'roof';
+  }
+
+  _createModule(cell, tile, grid, position) {
     const module = new THREE.Group();
     module.name = `${cell.occupancy}:${tile?.id || 'unknown'}:${cell.key()}`;
+    module.position.set(position.x, position.y, position.z);
     const previousMaterials = this.materials;
     const previousCell = this._currentCell;
     const previousLightIndex = this._moduleLightIndex;
@@ -411,7 +487,7 @@ export class TileView {
 
     try {
       if (cell.occupancy === 'floor') {
-        this._buildFloor(module, cell, tile);
+        this._buildFloor(module, cell, tile, grid);
         this._buildInvisibleRoofShadow(module);
         if (cell.tags.has('propCandidate')) this._buildProp(module, cell, tile);
         return module;
@@ -427,13 +503,18 @@ export class TileView {
         return module;
       }
 
+      if (cell.occupancy === 'stair') {
+        this._buildStair(module, cell, tile);
+        return module;
+      }
+
       if (cell.occupancy === 'support') {
         this._buildSupport(module);
         return module;
       }
 
       if (cell.occupancy === 'roof') {
-        this._buildOpenCeilingCue(module, cell);
+        this._buildRoof(module, cell);
         return module;
       }
 
@@ -450,10 +531,12 @@ export class TileView {
     return cell.style === 'western' || tile?.style === 'western' ? this.westernMaterials : this.defaultMaterials;
   }
 
-  _buildFloor(module, cell, tile) {
+  _buildFloor(module, cell, tile, grid) {
     const checker = (cell.x + cell.z) % 2 === 0;
     const configuredFloor = this._configuredMaterial('floor', 'texture', checker ? this.materials.floor : this.materials.floorAlt);
     this._box(module, configuredFloor, [1.004, 0.08, 1.004], [0, 0.04, 0]);
+    this._buildStairwellRails(module, cell, grid);
+    this._buildPartitionWalls(module, cell);
     if (cell.style === 'western' || tile?.style === 'western') {
       return;
     }
@@ -461,10 +544,40 @@ export class TileView {
     this._box(module, this.materials.floorLine, [0.92, 0.012, 0.018], [0, 0.094, 0.49]);
   }
 
+  _buildPartitionWalls(module, cell) {
+    for (const dir of ['PX', 'PZ']) {
+      if (cell.tags.has(`partitionWall:${dir}`)) {
+        this._buildPanelWall(module, dir, false);
+      }
+    }
+  }
+
+  _buildStairwellRails(module, cell, grid) {
+    if (!grid) return;
+    for (const dir of HORIZONTAL_DIRS) {
+      const d = DIR_DELTA[dir];
+      const neighbor = grid.getCell(cell.x + d.x, cell.y, cell.z + d.z);
+      if (neighbor?.occupancy !== 'stairwell') continue;
+      if (this._isStairLandingEdge(dir, neighbor)) continue;
+      this._buildRail(module, dir);
+    }
+  }
+
+  _isStairLandingEdge(dirFromFloorToVoid, stairwellCell) {
+    const stairDir = Array.from(stairwellCell.tags).find((tag) => tag.startsWith('stairDir:'))?.split(':')[1];
+    return stairDir && OPPOSITE_DIR[dirFromFloorToVoid] === stairDir;
+  }
+
   _buildInvisibleRoofShadow(module) {
     if (this.lightingConfig.roofShadows === false) return;
+    if (this._roofShadowMatrices) {
+      const matrix = this._composeBoxMatrix(module, [1.35, 0.05, 1.35], [0, 1.92, 0], 0);
+      this._roofShadowMatrices.push(matrix);
+      return;
+    }
+
     const roof = new THREE.Mesh(this.roofShadowGeometry, this.roofShadowMaterial);
-    roof.position.set(0, 1.5, 0);
+    roof.position.set(0, 1.92, 0);
     roof.castShadow = true;
     roof.receiveShadow = false;
     roof.renderOrder = -20;
@@ -486,10 +599,61 @@ export class TileView {
     }
   }
 
+  _buildStair(module, cell, tile) {
+    const dirTag = Array.from(cell.tags).find((tag) => tag.startsWith('stairDir:'));
+    const stepTag = Array.from(cell.tags).find((tag) => tag.startsWith('stairStep:'));
+    const lengthTag = Array.from(cell.tags).find((tag) => tag.startsWith('stairLength:'));
+    const direction = dirTag?.split(':')[1] || 'PX';
+    const stepIndex = Number(stepTag?.split(':')[1] || 0);
+    const length = Math.max(1, Number(lengthTag?.split(':')[1] || 4));
+    const rotation = direction === 'PX' ? -Math.PI / 2 : direction === 'NX' ? Math.PI / 2 : direction === 'NZ' ? Math.PI : 0;
+    const treadMaterial = this._configuredMaterial('floor', 'texture', this.materials.floor);
+    const trimMaterial = this._configuredMaterial('trim', 'trim', this.materials.wallTrim);
+    const point = (along, across, y) => {
+      if (direction === 'PX') return [along, y, across];
+      if (direction === 'NX') return [-along, y, across];
+      if (direction === 'PZ') return [across, y, along];
+      return [across, y, -along];
+    };
+
+    this._box(module, trimMaterial, [0.96, 0.08, 0.96], [0, 0.04, 0]);
+    for (let tread = 0; tread < 4; tread++) {
+      const globalTread = stepIndex * 4 + tread + 1;
+      const height = 0.1 + (globalTread / (length * 4)) * 0.94;
+      const along = -0.36 + tread * 0.24;
+      this._box(module, treadMaterial, [0.9, 0.08, 0.2], point(along, 0, height), rotation);
+      this._box(module, trimMaterial, [0.92, 0.08, 0.03], point(along - 0.1, 0, height + 0.055), rotation);
+    }
+
+    if (cell.style === 'western' || tile?.style === 'western') {
+      this._box(module, trimMaterial, [0.08, 0.42, 0.9], point(0, -0.44, 0.48), rotation);
+      this._box(module, trimMaterial, [0.08, 0.42, 0.9], point(0, 0.44, 0.48), rotation);
+    }
+  }
+
   _buildSupport(module) {
     this._box(module, this.materials.support, [0.34, 1, 0.34], [0, 0.5, 0]);
     this._box(module, this.materials.wallTrim, [0.56, 0.12, 0.56], [0, 0.08, 0]);
     this._box(module, this.materials.wallTrim, [0.5, 0.12, 0.5], [0, 0.94, 0]);
+  }
+
+  _buildRoof(module, cell) {
+    if (cell.tags.has('flatRoof')) {
+      this._buildFlatRoof(module, cell);
+      return;
+    }
+    this._buildOpenCeilingCue(module, cell);
+  }
+
+  _buildFlatRoof(module, cell) {
+    const roofMaterial = this._configuredMaterial('roof', 'texture', this.materials.wallTrim);
+    const lipMaterial = this._configuredMaterial('trim', 'trim', this.materials.wallTrim);
+    this._box(module, roofMaterial, [1.02, 0.04, 1.02], [0, 0.92, 0]);
+    for (const dir of HORIZONTAL_DIRS) {
+      if (!cell.tags.has(`roofEdge:${dir}`)) continue;
+      const t = DIR_OFFSET[dir];
+      this._box(module, lipMaterial, [0.12, 0.16, 1.04], [t.x, 0.84, t.z], t.rot);
+    }
   }
 
   _buildOpenCeilingCue(module, cell) {
@@ -517,28 +681,35 @@ export class TileView {
     const isWindow = cell.tags.has('variantWindow') || tile?.tags?.has('window') || tile?.id?.includes('window');
 
     for (const dir of renderDirs) {
+      const reachesRoof = this._hasRoofOverInterior(cell, grid, dir);
       if (isRail) {
         this._buildRail(module, dir);
       } else if (isDoor) {
-        this._buildDoorWall(module, dir);
+        this._buildDoorWall(module, dir, reachesRoof);
       } else {
-        this._buildPanelWall(module, dir, isWindow);
+        this._buildPanelWall(module, dir, isWindow, reachesRoof);
       }
     }
 
     if (renderDirs.length > 1 || cell.tags.has('corner')) {
-      this._box(module, this.materials.wallTrim, [0.24, 1.55, 0.24], [0, 0.78, 0]);
+      const reachesRoof = renderDirs.some((dir) => this._hasRoofOverInterior(cell, grid, dir));
+      this._box(module, this.materials.wallTrim, [0.24, reachesRoof ? 1.92 : 1.55, 0.24], [0, reachesRoof ? 0.96 : 0.78, 0]);
     }
   }
 
-  _buildPanelWall(module, dir, hasWindow) {
+  _buildPanelWall(module, dir, hasWindow, reachesRoof = false) {
     const t = DIR_OFFSET[dir];
     const wallMaterial = this._configuredMaterial('wall', 'texture', this.materials.wall);
     const trimMaterial = this._configuredMaterial('trim', 'trim', this.materials.wallTrim);
-    this._box(module, wallMaterial, [0.18, 1.3, 1.06], [t.x, 0.68, t.z], t.rot);
-    this._box(module, trimMaterial, [0.24, 0.14, 1.14], [t.x, 1.36, t.z], t.rot);
-    this._box(module, trimMaterial, [0.22, 1.44, 0.1], this._wallPoint(dir, 0, -0.5, 0.72), t.rot);
-    this._box(module, trimMaterial, [0.22, 1.44, 0.1], this._wallPoint(dir, 0, 0.5, 0.72), t.rot);
+    const wallHeight = reachesRoof ? 1.82 : 1.3;
+    const wallCenter = reachesRoof ? 0.94 : 0.68;
+    const topTrimY = reachesRoof ? 1.84 : 1.36;
+    const postHeight = reachesRoof ? 1.88 : 1.44;
+    const postCenter = reachesRoof ? 0.96 : 0.72;
+    this._box(module, wallMaterial, [0.18, wallHeight, 1.06], [t.x, wallCenter, t.z], t.rot);
+    this._box(module, trimMaterial, [0.24, 0.14, 1.14], [t.x, topTrimY, t.z], t.rot);
+    this._box(module, trimMaterial, [0.22, postHeight, 0.1], this._wallPoint(dir, 0, -0.5, postCenter), t.rot);
+    this._box(module, trimMaterial, [0.22, postHeight, 0.1], this._wallPoint(dir, 0, 0.5, postCenter), t.rot);
 
     if (hasWindow) {
       this._box(module, this._configuredMaterial('window', 'texture', this.materials.glass), [0.18, 0.46, 0.46], this._wallPoint(dir, 0.012, 0, 0.82), t.rot);
@@ -547,16 +718,19 @@ export class TileView {
     }
   }
 
-  _buildDoorWall(module, dir) {
+  _buildDoorWall(module, dir, reachesRoof = false) {
     const t = DIR_OFFSET[dir];
     const wallMaterial = this._configuredMaterial('wall', 'texture', this.materials.wall);
     const trimMaterial = this._configuredMaterial('trim', 'trim', this.materials.wallTrim);
     const doorMaterial = this._configuredMaterial('door', 'texture', this.materials.door);
-    this._box(module, wallMaterial, [0.18, 1.25, 0.24], this._wallPoint(dir, 0, -0.43, 0.66), t.rot);
-    this._box(module, wallMaterial, [0.18, 1.25, 0.24], this._wallPoint(dir, 0, 0.43, 0.66), t.rot);
-    this._box(module, trimMaterial, [0.22, 0.16, 1.08], [t.x, 1.32, t.z], t.rot);
-    this._box(module, doorMaterial, [0.11, 0.7, 0.18], this._wallPoint(dir, 0.018, -0.13, 0.48), t.rot);
-    this._box(module, doorMaterial, [0.11, 0.7, 0.18], this._wallPoint(dir, 0.018, 0.13, 0.48), t.rot);
+    const sideHeight = reachesRoof ? 1.8 : 1.25;
+    const sideCenter = reachesRoof ? 0.93 : 0.66;
+    const headerY = reachesRoof ? 1.82 : 1.32;
+    this._box(module, wallMaterial, [0.18, sideHeight, 0.24], this._wallPoint(dir, 0, -0.43, sideCenter), t.rot);
+    this._box(module, wallMaterial, [0.18, sideHeight, 0.24], this._wallPoint(dir, 0, 0.43, sideCenter), t.rot);
+    this._box(module, trimMaterial, [0.22, 0.16, 1.08], [t.x, headerY, t.z], t.rot);
+    this._box(module, doorMaterial, [0.08, 0.76, 0.08], this._wallPoint(dir, 0.018, -0.28, 0.48), t.rot);
+    this._box(module, doorMaterial, [0.08, 0.76, 0.08], this._wallPoint(dir, 0.018, 0.28, 0.48), t.rot);
   }
 
   _buildRail(module, dir) {
@@ -602,6 +776,11 @@ export class TileView {
 
   _buildWesternProp(module, variant) {
     this._orientProp(module);
+    const customDefinition = this._currentPropDefinition();
+    if (customDefinition) {
+      this._buildCustomProp(module, customDefinition);
+      return;
+    }
     if (this._currentPropCell?.tags.has('propBarCounter')) {
       this._westernBarCounter(module);
       return;
@@ -677,10 +856,10 @@ export class TileView {
 
   _orientProp(module) {
     const tags = this._currentPropCell?.tags || new Set();
-    if (tags.has('propFacePX')) module.rotation.y = Math.PI;
-    if (tags.has('propFaceNX')) module.rotation.y = 0;
-    if (tags.has('propFacePZ')) module.rotation.y = -Math.PI / 2;
-    if (tags.has('propFaceNZ')) module.rotation.y = Math.PI / 2;
+    if (tags.has('propFacePX')) module.rotation.y = -Math.PI / 2;
+    if (tags.has('propFaceNX')) module.rotation.y = Math.PI / 2;
+    if (tags.has('propFacePZ')) module.rotation.y = Math.PI;
+    if (tags.has('propFaceNZ')) module.rotation.y = 0;
   }
 
   _westernBarCounter(module) {
@@ -773,8 +952,52 @@ export class TileView {
     this._box(module, this.materials.floorLine, [0.06, 0.24, 0.06], [x, 0.18, z]);
   }
 
+  _currentPropDefinition() {
+    const tags = this._currentPropCell?.tags || new Set();
+    const typeTag = Array.from(tags).find((tag) => tag.startsWith('propType:'));
+    if (!typeTag) return null;
+    const propId = normalizePropId(typeTag.slice('propType:'.length));
+    return this.propDefinitions.get(propId) || null;
+  }
+
+  _buildCustomProp(module, definition) {
+    for (const box of definition.boxes || []) {
+      const scale = sanitizeVector(box.scale, [0.25, 0.25, 0.25], 0.02, 1);
+      const position = sanitizeVector(box.position, [0, 0.25, 0], -0.5, 1.5);
+      const material = this._propMaterial(box.material);
+      this._box(module, material, scale, position, Number(box.rotationY || 0));
+    }
+
+    if (definition.light) {
+      const position = sanitizeVector(definition.light.position, [0, 0.75, 0], -0.5, 1.5);
+      this._addPointLight(
+        module,
+        position,
+        parseColor(definition.light.color, 0xff9d3b),
+        clampNumber(definition.light.intensity, 0.05, 1.2, 0.32),
+        clampNumber(definition.light.distance, 1, 6, 3)
+      );
+    }
+  }
+
+  _propMaterial(materialName) {
+    if (materialName === 'trim') return this.materials.floorLine;
+    if (materialName === 'wall') return this.materials.wall;
+    if (materialName === 'door') return this.materials.door;
+    if (materialName === 'metal') return this.configMaterials.trim.metal;
+    if (materialName === 'rug') return this.materials.rug;
+    if (materialName === 'plant') return this.materials.plant;
+    if (materialName === 'planter') return this.materials.planter;
+    if (materialName === 'light') return this.materials.light;
+    return this.materials.furniture;
+  }
+
   _addPointLight(group, position, color, intensity, distance) {
     if (this.typeConfig.prop?.lighting === false) return null;
+    const maxPointLights = Math.max(0, Number(this.lightingConfig.maxPointLights ?? 12));
+    if ((this._pointLightsAdded || 0) >= maxPointLights) return null;
+    this._pointLightsAdded = (this._pointLightsAdded || 0) + 1;
+
     const cellKey = this._currentCell?.key?.() || 'scene';
     const lightId = `${cellKey}:light:${this._moduleLightIndex || 0}`;
     this._moduleLightIndex = (this._moduleLightIndex || 0) + 1;
@@ -820,9 +1043,18 @@ export class TileView {
     for (const dir of HORIZONTAL_DIRS) {
       const d = DIR_DELTA[dir];
       const neighbor = grid.getCell(cell.x + d.x, cell.y, cell.z + d.z);
-      if (neighbor && ['floor', 'bridge'].includes(neighbor.occupancy)) dirs.push(dir);
+      if (neighbor && ['floor', 'bridge', 'stair'].includes(neighbor.occupancy)) dirs.push(dir);
     }
     return dirs;
+  }
+
+  _hasRoofOverInterior(cell, grid, dir) {
+    if (!grid) return false;
+    const d = DIR_DELTA[dir];
+    const interior = grid.getCell(cell.x + d.x, cell.y, cell.z + d.z);
+    if (!interior || !['floor', 'bridge', 'stair'].includes(interior.occupancy)) return false;
+    const roof = grid.getCell(interior.x, interior.y + 1, interior.z);
+    return roof?.occupancy === 'roof' && roof.tags.has('flatRoof');
   }
 
   _normalOffset(dir, amount) {
@@ -842,21 +1074,130 @@ export class TileView {
   }
 
   _box(group, material, scale, position, rotationY = 0) {
+    if (this._boxBatches) {
+      return this._queueBoxInstance(group, material, scale, position, rotationY);
+    }
+
     const mesh = new THREE.Mesh(this.geometry, material);
     mesh.scale.set(scale[0], scale[1], scale[2]);
     mesh.position.set(position[0], position[1], position[2]);
     mesh.rotation.y = rotationY;
-    mesh.castShadow = true;
-    mesh.receiveShadow = true;
+    mesh.castShadow = this.lightingConfig.moduleShadows === true;
+    mesh.receiveShadow = this.lightingConfig.moduleShadows === true;
     group.add(mesh);
     return mesh;
   }
 
+  _queueBoxInstance(group, material, scale, position, rotationY = 0) {
+    const matrix = this._composeBoxMatrix(group, scale, position, rotationY);
+
+    let batch = this._boxBatches.get(material);
+    if (!batch) {
+      batch = [];
+      this._boxBatches.set(material, batch);
+    }
+    batch.push(matrix);
+    return null;
+  }
+
+  _composeBoxMatrix(group, scale, position, rotationY = 0) {
+    const parentRotation = group.rotation.y || 0;
+    const localPosition = new THREE.Vector3(position[0], position[1], position[2]);
+    localPosition.applyAxisAngle(new THREE.Vector3(0, 1, 0), parentRotation);
+
+    const worldPosition = new THREE.Vector3(
+      group.position.x + localPosition.x,
+      group.position.y + localPosition.y,
+      group.position.z + localPosition.z
+    );
+    const quaternion = new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(0, 1, 0), parentRotation + rotationY);
+    return new THREE.Matrix4().compose(worldPosition, quaternion, new THREE.Vector3(scale[0], scale[1], scale[2]));
+  }
+
+  _flushBoxBatches() {
+    if (!this._boxBatches) return;
+    const moduleShadows = this.lightingConfig.moduleShadows === true;
+    for (const [material, matrices] of this._boxBatches.entries()) {
+      if (!matrices.length) continue;
+      const mesh = new THREE.InstancedMesh(this.geometry, material, matrices.length);
+      for (let i = 0; i < matrices.length; i++) {
+        mesh.setMatrixAt(i, matrices[i]);
+      }
+      mesh.instanceMatrix.needsUpdate = true;
+      mesh.castShadow = moduleShadows;
+      mesh.receiveShadow = moduleShadows;
+      mesh.computeBoundingSphere?.();
+      this.group.add(mesh);
+      this.instanceMeshes.push(mesh);
+    }
+    this._flushRoofShadowBatch();
+    this._boxBatches = null;
+    this._roofShadowMatrices = null;
+  }
+
+  _flushRoofShadowBatch() {
+    if (!this._roofShadowMatrices?.length) return;
+    const mesh = new THREE.InstancedMesh(this.roofShadowGeometry, this.roofShadowMaterial, this._roofShadowMatrices.length);
+    for (let i = 0; i < this._roofShadowMatrices.length; i++) {
+      mesh.setMatrixAt(i, this._roofShadowMatrices[i]);
+    }
+    mesh.instanceMatrix.needsUpdate = true;
+    mesh.castShadow = true;
+    mesh.receiveShadow = false;
+    mesh.renderOrder = -20;
+    mesh.computeBoundingSphere?.();
+    this.group.add(mesh);
+    this.roofShadowInstanceMesh = mesh;
+  }
+
   clear() {
+    if (this.roofShadowInstanceMesh) {
+      this.group.remove(this.roofShadowInstanceMesh);
+      this.roofShadowInstanceMesh = null;
+    }
+    for (const mesh of this.instanceMeshes) {
+      this.group.remove(mesh);
+    }
+    this.instanceMeshes = [];
     for (const { mesh } of this.meshes.values()) {
       this.group.remove(mesh);
     }
     this.meshes.clear();
     this.lightHandles.clear();
   }
+}
+
+function normalizePropDefinition(definition) {
+  const id = normalizePropId(definition?.id);
+  if (!id || !Array.isArray(definition?.boxes) || !definition.boxes.length) return null;
+  return {
+    id,
+    label: String(definition.label || id),
+    placement: definition.placement === 'center' ? 'center' : 'wall',
+    description: String(definition.description || ''),
+    boxes: definition.boxes.slice(0, 24).map((box) => ({
+      material: String(box.material || 'furniture'),
+      scale: sanitizeVector(box.scale, [0.25, 0.25, 0.25], 0.02, 1),
+      position: sanitizeVector(box.position, [0, 0.25, 0], -0.5, 1.5),
+      rotationY: clampNumber(box.rotationY, -Math.PI * 2, Math.PI * 2, 0),
+    })),
+    light: definition.light || null,
+  };
+}
+
+function sanitizeVector(value, fallback, min, max) {
+  if (!Array.isArray(value) || value.length < 3) return fallback;
+  return [0, 1, 2].map((idx) => clampNumber(value[idx], min, max, fallback[idx]));
+}
+
+function clampNumber(value, min, max, fallback) {
+  const number = Number(value);
+  if (!Number.isFinite(number)) return fallback;
+  return Math.max(min, Math.min(max, number));
+}
+
+function parseColor(value, fallback) {
+  if (typeof value === 'string' && /^#[0-9a-f]{6}$/i.test(value)) return Number.parseInt(value.slice(1), 16);
+  const number = Number(value);
+  return Number.isFinite(number) ? number : fallback;
 }

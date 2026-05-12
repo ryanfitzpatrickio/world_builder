@@ -13,6 +13,16 @@
   "scripts": {
     "dev": "vite --host 127.0.0.1",
     "build": "vite build",
+    "codex:level": "node scripts/codex-level.mjs",
+    "debug:props": "node scripts/check-prop-rules.mjs",
+    "debug:validate": "./node_modules/.bin/vitexec --path / --timeout 20 vitexec/check-validator.js",
+    "debug:room-transform": "./node_modules/.bin/vitexec --path / --timeout 20 vitexec/check-room-transform.js",
+    "debug:room-connect": "./node_modules/.bin/vitexec --path / --timeout 20 vitexec/check-room-connect.js",
+    "debug:room-stack": "./node_modules/.bin/vitexec --path / --timeout 20 vitexec/check-room-stack.js",
+    "debug:free-cam": "./node_modules/.bin/vitexec --path / --timeout 20 vitexec/check-free-cam.js",
+    "debug:side-panel-selects": "./node_modules/.bin/vitexec --path / --timeout 20 vitexec/check-side-panel-selects.js",
+    "debug:save-as": "./node_modules/.bin/vitexec --path / --timeout 20 vitexec/check-save-as.js",
+    "debug:glb-export": "./node_modules/.bin/vitexec --path / --timeout 20 vitexec/check-glb-export.js",
     "debug:level": "vitexec --gpu --path / --timeout 20 --screenshot /tmp/level-maker-vitexec.png vitexec/check-level.js",
     "preview": "vite preview --host 127.0.0.1"
   },
@@ -21,6 +31,7 @@
   },
   "devDependencies": {
     "vite": "^7.2.7",
-    "vitexec": "^0.1.12"
+    "vitexec": "^0.1.12",
+    "ws": "^8.20.0"
   }
 }

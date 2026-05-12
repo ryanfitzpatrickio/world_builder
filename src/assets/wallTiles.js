@@ -48,6 +48,21 @@ export function createWallTiles() {
       },
     }),
     new TileDefinition({
+      id: 'wall_stone_open_doorway',
+      category: 'wall',
+      style: 'stone',
+      tags: ['wall', 'door', 'doorway', 'open', 'stone', 'straight'],
+      color: 0x6f5134,
+      sockets: {
+        PX: 'wall',
+        NX: 'wall',
+        NY: 'any',
+        PY: 'any',
+        PZ: 'wall',
+        NZ: 'wall',
+      },
+    }),
+    new TileDefinition({
       id: 'wall_stone_corner',
       category: 'wall',
       style: 'stone',

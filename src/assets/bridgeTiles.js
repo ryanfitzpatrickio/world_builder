@@ -13,8 +13,8 @@ export function createBridgeTiles() {
         NX: 'bridge',
         PZ: 'bridge_side',
         NZ: 'bridge_side',
-        NY: 'support_socket',
-        PY: 'empty',
+        NY: 'any',
+        PY: 'any',
       },
     }),
     new TileDefinition({
@@ -28,8 +28,8 @@ export function createBridgeTiles() {
         NX: 'wall_stone',
         PZ: 'support_socket',
         NZ: 'support_socket',
-        PY: 'empty',
-        NY: 'bridge',
+        PY: 'any',
+        NY: 'any',
       },
     }),
     new TileDefinition({
@@ -43,8 +43,8 @@ export function createBridgeTiles() {
         NX: 'support_socket',
         PZ: 'support_socket',
         NZ: 'support_socket',
-        PY: 'support',
-        NY: 'ground',
+        PY: 'any',
+        NY: 'any',
       },
     }),
   ];

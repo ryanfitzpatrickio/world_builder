@@ -27,4 +27,14 @@ export class InspectorPanel {
     this.tags.textContent = `Tags: ${Array.from(cell.tags).join(', ')}`;
     this.forceSelect.value = cell.lockedByUser ? cell.fixedTile : '';
   }
+
+  updateShape(shape) {
+    if (!shape) {
+      this.update(null);
+      return;
+    }
+    this.element.textContent = `${shape.type} ${shape.id} | floor ${shape.floor}`;
+    this.tags.textContent = `Tags: ${Array.from(shape.tags || []).join(', ')}`;
+    this.forceSelect.value = '';
+  }
 }

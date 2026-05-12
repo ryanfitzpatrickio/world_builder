@@ -8,7 +8,7 @@ export const wallPerimeterRule = {
   apply(grid) {
     const candidates = [];
     for (const cell of grid.getAllCells()) {
-      if (cell.occupancy !== 'floor') continue;
+      if (cell.occupancy !== 'floor' && cell.occupancy !== 'stair') continue;
       for (const dir of HORIZONTAL_DIRS) {
         const delta = DIRS[dir];
         const neighbor = grid.getCell(cell.x + delta.x, cell.y + delta.y, cell.z + delta.z);
@@ -26,6 +26,7 @@ export const wallPerimeterRule = {
       wall.style = info.style;
       wall.shapeId = info.src;
       wall.generatedBy = 'wall-perimeter';
+      wall.tags.delete('empty');
       wall.tags.add('wall');
       wall.tags.add('generated');
     }

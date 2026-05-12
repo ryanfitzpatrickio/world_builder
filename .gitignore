@@ -24,3 +24,5 @@ coverage/
 playwright-report/
 test-results/
 
+# Local editor autosaves. Keep curated examples under public/levels instead.
+saved-levels/

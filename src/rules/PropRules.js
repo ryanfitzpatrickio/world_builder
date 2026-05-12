@@ -1,3 +1,5 @@
+import { BUILTIN_PROP_TAGS } from '../props/PropDefinitions.js';
+
 const HORIZONTAL_DIRS = ['PX', 'NX', 'PZ', 'NZ'];
 
 const DIRS = {
@@ -7,19 +9,7 @@ const DIRS = {
   NZ: { x: 0, z: -1 },
 };
 
-const PROP_TAGS = [
-  'propBarCounter',
-  'propPokerTable',
-  'propBarrelStack',
-  'propShelf',
-  'propBedCot',
-  'propPiano',
-  'propWantedPoster',
-  'propLanternStand',
-  'propRug',
-  'propStoolPair',
-  'propCrateStack',
-];
+const PROP_TAGS = Object.values(BUILTIN_PROP_TAGS);
 
 export const propRule = {
   id: 'prop-rule',
@@ -29,6 +19,8 @@ export const propRule = {
     for (const cell of grid.getAllCells()) {
       if (cell.occupancy !== 'floor') continue;
       if (cell.lockedByUser && cell.generatedBy === 'paint-brush') continue;
+      if (cell.tags.has('stairLanding') || cell.tags.has('keepClear')) continue;
+      if (cell.tags.has('authoredProp')) continue;
       clearPropTags(cell);
 
       if (cell.style === 'western') {
@@ -43,7 +35,9 @@ export const propRule = {
 function clearPropTags(cell) {
   cell.tags.delete('propCandidate');
   for (const tag of PROP_TAGS) cell.tags.delete(tag);
-  for (const dir of HORIZONTAL_DIRS) cell.tags.delete(`propFace${dir}`);
+  for (const tag of Array.from(cell.tags)) {
+    if (tag.startsWith('propType:') || tag.startsWith('propFace')) cell.tags.delete(tag);
+  }
 }
 
 function assignDefaultProp(cell, config) {

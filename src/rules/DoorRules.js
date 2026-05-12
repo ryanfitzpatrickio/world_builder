@@ -46,6 +46,8 @@ export const doorRule = {
 
       cell.tags.add('forcedDoor');
       cell.tags.add('variantDoor');
+      cell.tags.add('openDoorway');
+      cell.tags.add('exportEmpty');
       cell.style = cell.style || 'stone';
       cell.generatedBy = 'door-rule';
 
